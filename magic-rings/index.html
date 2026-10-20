@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Magic Rings with Tolo | KiddyMaitri</title>
+<meta name="description" content="A spinning-ring puzzle for kids. Turn the rings to match countries, capitals, money, animals, helpers, Indian states and planets — in English, Hindi and Odia.">
+<meta name="theme-color" content="#1F5A40">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta property="og:title" content="Magic Rings with Tolo">
+<meta property="og:description" content="Spin, match and learn — in English, हिन्दी and ଓଡ଼ିଆ.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23FFC23A'/%3E%3Ccircle cx='50' cy='50' r='31' fill='%231F5A40'/%3E%3Ccircle cx='50' cy='50' r='17' fill='%23FFC23A'/%3E%3C/svg%3E">
+<link rel="preload" href="assets/fonts/baloo-2-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/base.css?v=3">
+<link rel="stylesheet" href="css/style.css?v=3">
+</head>
+<body>
+<!-- moving background: floating pieces that drift on their own and can be grabbed, thrown and fed to Tolo -->
+<div class="bg" id="bg" aria-hidden="true"><div class="toys" id="toys"></div></div>
+
+<div id="app" data-screen="home">
+
+  <!-- =========================================================== HOME -->
+  <section id="home" class="screen" aria-label="Home">
+    <header class="home-top">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>KiddyMaitri</span></div>
+      <div class="home-tools">
+        <div class="lang-switch" role="group" id="lang-switch">
+          <button data-lang="en" lang="en">English</button>
+          <button data-lang="hi" lang="hi">हिन्दी</button>
+          <button data-lang="or" lang="or" class="or">ଓଡ଼ିଆ</button>
+        </div>
+        <span class="chip stars-chip"><svg viewBox="0 0 24 24"><use href="#i-star" fill="#FFC23A"/></svg><span id="stars-total"></span></span>
+        <button class="round-btn" id="home-sound" aria-label="Sound"></button>
+      </div>
+    </header>
+
+    <div class="hero">
+      <h1 class="hero-title"><span class="a" data-t="heroA"></span><span class="b" data-t="heroB"></span></h1>
+      <p class="hero-sub" data-t="heroSub"></p>
+    </div>
+
+    <div class="carousel" id="carousel" aria-roledescription="carousel">
+      <button class="car-arrow left" data-act="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><use href="#i-arrow"/></svg></button>
+      <div class="car-track" id="car-track"></div>
+      <button class="car-arrow right" data-act="nextcard" aria-label="Next"><svg viewBox="0 0 24 24"><use href="#i-arrow"/></svg></button>
+    </div>
+
+    <div class="launch">
+      <div class="diff" role="radiogroup" id="diff"></div>
+      <button class="btn btn-dark btn-play" data-act="play" id="play-btn"></button>
+    </div>
+
+    <div class="home-tolo">
+      <div data-tolo="home"></div>
+      <div class="bubble"><small data-t="toloSays"></small><p id="home-say"></p></div>
+    </div>
+
+    <footer class="home-foot"><span data-t="keys"></span><span class="sep">·</span><span id="more-games"></span></footer>
+  </section>
+
+  <!-- =========================================================== PLAY -->
+  <section id="play" class="screen" aria-label="Game">
+    <header class="topbar">
+      <div class="brand-play"><h1 id="play-title"></h1><p id="play-sub"></p></div>
+      <div class="stats">
+        <div class="stat" style="--c:#FFE08A" id="st-moves"><span data-t="moves"></span><b>0</b></div>
+        <div class="stat" style="--c:#C2EBDD" id="st-locks"><span data-t="locks"></span><b>0/0</b></div>
+        <div class="stat" style="--c:#D4CEFA" id="st-time"><span data-t="time"></span><b>0:00</b></div>
+      </div>
+    </header>
+    <main class="board-wrap">
+      <div class="board-card">
+        <div class="board" id="board">
+          <canvas id="rings" aria-label="Magic rings" role="img"></canvas>
+          <button class="ready-btn" id="ready-btn" data-act="ready"></button>
+        </div>
+        <div class="caption" id="caption" aria-live="polite"></div>
+      </div>
+      <aside class="side">
+        <div class="tolo-card">
+          <div data-tolo="play"></div>
+          <div class="bubble"><small data-t="toloSays"></small><p id="play-say"></p></div>
+        </div>
+        <div class="legend panel">
+          <h2 data-t="ringsTitle"></h2>
+          <ol class="legend-list" id="legend"></ol>
+        </div>
+      </aside>
+    </main>
+    <nav class="dock" id="dock" aria-label="Game controls"></nav>
+  </section>
+
+  <!-- =========================================================== MODALS -->
+  <div class="overlay" id="intro-ov">
+    <div class="modal intro" id="intro" role="dialog" aria-modal="true">
+      <div class="art" id="intro-art"><div data-tolo="intro"></div></div>
+      <div class="body">
+        <div class="count" id="intro-count"></div>
+        <h2 id="intro-title"></h2>
+        <p class="say" id="intro-say"></p>
+        <div class="foot"><div class="dots" id="intro-dots"></div><span id="intro-btns" style="display:flex;gap:10px"></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="overlay" id="done-ov">
+    <div class="modal done" id="done" role="dialog" aria-modal="true">
+      <div class="band" id="done-band"><svg class="rays" viewBox="-50 -50 100 100" id="rays"></svg><div data-tolo="done"></div></div>
+      <h2 data-t="complete"></h2>
+      <p class="msg" id="done-msg"></p>
+      <div class="stars" id="done-stars"></div>
+      <div class="grid" id="done-grid"></div>
+      <div class="matched"><h3 data-t="matched"></h3><div class="match-list" id="match-list"></div></div>
+      <div class="btns" id="done-btns"></div>
+    </div>
+  </div>
+
+  <canvas id="float" aria-hidden="true"></canvas>
+  <canvas id="fx"></canvas>
+</div>
+<div class="toy-lift" id="toy-lift" aria-hidden="true"></div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2.2l2.9 6.2 6.8.8-5 4.7 1.3 6.7L12 17.2l-6 3.4 1.3-6.7-5-4.7 6.8-.8z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 3l9 8.5V21h-6v-6H9v6H3z" fill="currentColor"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2zM9 19h6v2a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1z" fill="currentColor"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3z" fill="currentColor"/><path d="M16 9l6 6M22 9l-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M20.5 3v5.5H15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><path d="M8.5 8.5a3.5 3.5 0 1 1 5 3.2c-1 .5-1.5 1.2-1.5 2.3v.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="12" rx="3" fill="currentColor"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.6"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="12" rx="3" fill="currentColor"/><path d="M8 10V7a4 4 0 0 1 7.6-1.7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="12" cy="12" r="3.4" fill="currentColor"/></symbol>
+</svg>
+
+<script src="js/i18n.js?v=3"></script>
+<script src="js/levels/01-countries.js?v=3"></script>
+<script src="js/levels/02-animals.js?v=3"></script>
+<script src="js/levels/03-helpers.js?v=3"></script>
+<script src="js/levels/04-states.js?v=3"></script>
+<script src="js/levels/05-space.js?v=3"></script>
+<script src="js/game.js?v=3"></script>
+</body>
+</html>
