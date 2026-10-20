@@ -1,7 +1,7 @@
 /* =====================================================================
    Magic Rings with Tolo — game engine (KiddyMaitri)
-   Rings are drawn on a <canvas>. Each ring turns on its own; the inside ring is the guide.
-   A ring locks when every slice matches the guide ring. Lock them all to win.
+   Cards are drawn on a <canvas> board that leans in 3D. Every card is dragged on its own; the inside ring is the guide.
+   A card turns gold when it sits in the same slice as its partner on the guide ring. Match them all to win.
    Puzzle content lives in js/levels/*.js and words in js/i18n.js.
    ===================================================================== */
 "use strict";
@@ -502,6 +502,11 @@ function layoutBoard() {
   B.size = size; B.dpr = dpr;
   cv.width = size * dpr; cv.height = size * dpr;
   cv.style.width = size + "px"; cv.style.height = size + "px";
+  if (b3d) { b3d.style.width = size + "px"; b3d.style.height = size + "px"; }
+  BOARD3D.P = Math.max(700, size * 2.6);
+  stage.style.perspective = BOARD3D.P + "px";
+  stage.style.setProperty("--bs", size * .92 + "px");
+  shape3D();                                     // board thickness
   textCache.clear();
   geometry();
 }
@@ -523,9 +528,9 @@ function geometry() {
 }
 const slotAngle = (r, p) => -Math.PI / 2 + p * G().step + r.angle;
 function slotScreen(j, p) {
-  const rect = cv.getBoundingClientRect(), r = G().rings[j];
+  const r = G().rings[j];
   const a = slotAngle(r, p), rad = B.hub + (j + .5) * B.t;
-  return [rect.left + B.cx + Math.cos(a) * rad, rect.top + B.cy + Math.sin(a) * rad];
+  return toScreen(Math.cos(a) * rad, Math.sin(a) * rad);      // the board leans in 3D, so project onto the screen
 }
 
 // ================================================================ TEXT: best fit
@@ -745,14 +750,23 @@ function drawHub(now) {
 // ---- cards that are picked up or flying: drawn as upright chips on the full-screen layer
 function chipSize() { const w = Math.max(96, Math.min(190, B.size * .3)); return [w, w * .46]; }
 function roundRect(c2, x, y, w, h, r) { c2.beginPath(); c2.moveTo(x + r, y); c2.arcTo(x + w, y, x + w, y + h, r); c2.arcTo(x + w, y + h, x, y + h, r); c2.arcTo(x, y + h, x, y, r); c2.arcTo(x, y, x + w, y, r); c2.closePath(); }
-function drawChip(c2, r, e, x, y, scale, rot, colour) {
+function drawChip(c2, r, e, x, y, scale, rot, colour, flip = 0) {
   const [w0, h0] = chipSize(), w = w0 * scale, h = h0 * scale;
   const v = G().ents[e].values[r.ri];
+  const fx = Math.cos(flip);                      // a 3D flip: the card narrows, shows its back, and turns face up again
   c2.save(); c2.translate(x, y); c2.rotate(rot);
-  c2.shadowColor = "rgba(28,51,38,.4)"; c2.shadowBlur = 18 * scale; c2.shadowOffsetY = 8 * scale;
-  roundRect(c2, -w / 2, -h / 2, w, h, h * .32); c2.fillStyle = colour; c2.fill();
+  c2.shadowColor = "rgba(28,51,38,.4)"; c2.shadowBlur = 18 * scale; c2.shadowOffsetY = 8 * scale + Math.abs(Math.sin(flip)) * 10;
+  c2.scale(Math.max(.04, Math.abs(fx)), 1);
+  roundRect(c2, -w / 2, -h / 2, w, h, h * .32); c2.fillStyle = fx < 0 ? BOARD_INK : colour; c2.fill();
   c2.shadowColor = "transparent";
   c2.lineWidth = 3; c2.strokeStyle = "#fff"; c2.stroke();
+  if (fx < 0) {                                   // card back: Tolo's sunflower
+    c2.fillStyle = "#FFC23A";
+    for (let i = 0; i < 10; i++) { c2.beginPath(); c2.ellipse(Math.cos(i * TAU / 10) * h * .22, Math.sin(i * TAU / 10) * h * .22, h * .12, h * .06, i * TAU / 10, 0, TAU); c2.fill(); }
+    c2.fillStyle = "#8A5631"; c2.beginPath(); c2.arc(0, 0, h * .15, 0, TAU); c2.fill();
+    c2.restore();
+    return;
+  }
   if (r.def.icon) drawIcon(c2, v, 0, 0, h * .78);
   else {
     const txt = tl(v);
@@ -776,7 +790,7 @@ function drawFloat(now) {
     const mx = f.cx ?? (f.x + tx) / 2, my = f.cy ?? (f.y + ty) / 2;
     const x = (1 - e) * (1 - e) * f.x + 2 * (1 - e) * e * mx + e * e * tx;
     const y = (1 - e) * (1 - e) * f.y + 2 * (1 - e) * e * my + e * e * ty;
-    drawChip(fctx, g.rings[f.j], f.e, x, y, f.s0 + (.62 - f.s0) * e + Math.sin(Math.PI * e) * .12, (1 - e) * f.rot, cardColour(g.rings[f.j], f.e, f.p));
+    drawChip(fctx, g.rings[f.j], f.e, x, y, f.s0 + (.62 - f.s0) * e + Math.sin(Math.PI * e) * .12, (1 - e) * f.rot, cardColour(g.rings[f.j], f.e, f.p), (f.flip || 0) * e * TAU);
   }
   if (g.drag && g.drag.on) {
     const dr = g.drag, r = g.rings[dr.j];
@@ -788,7 +802,7 @@ function drawFloat(now) {
 function fly(j, p, e, from, opts = {}) {
   const g = G();
   g.rings[j].hidden[p]++;
-  g.flights.push({ j, p, e, x: from[0], y: from[1], t0: performance.now() + (opts.delay || 0), dur: opts.dur || 380, s0: opts.s0 ?? .7, rot: opts.rot || 0, cx: opts.cx, cy: opts.cy, done: opts.done });
+  g.flights.push({ j, p, e, x: from[0], y: from[1], t0: performance.now() + (opts.delay || 0), dur: opts.dur || 380, s0: opts.s0 ?? .7, rot: opts.rot || 0, cx: opts.cx, cy: opts.cy, flip: opts.flip || 0, done: opts.done });
 }
 function updateFlights(now) {
   const g = G();
@@ -810,7 +824,7 @@ function swapCards(j, a, b, opts = {}) {
   let left = 2;
   const done = () => { if (--left === 0) settle(j, [a, b], opts); };
   fly(j, a, r.order[a], opts.fromA || slotScreen(j, b), { done, s0: opts.fromA ? 1.05 : .7, dur: opts.fromA ? 260 : 440, rot: opts.rotA });
-  fly(j, b, r.order[b], slotScreen(j, a), { done, dur: 460, delay: 40 });
+  fly(j, b, r.order[b], slotScreen(j, a), { done, dur: 460, delay: 40, flip: reduceMotion ? 0 : 1 });
   audio.play("swap");
 }
 function settle(j, slots, opts) {
@@ -882,7 +896,7 @@ function startMix() {
   playSpeech.say(t("mixing"));
   toloPlay.react("think", 2400);
   audio.play("whirr");
-  const rect = cv.getBoundingClientRect(), ccx = rect.left + B.cx, ccy = rect.top + B.cy;
+  const [ccx, ccy] = boardCenter();
   let longest = 0;
   for (const r of g.rings.slice(1)) {
     const from = r.order.map((_, p) => slotScreen(r.j, p));
@@ -895,7 +909,7 @@ function startMix() {
       const a = rnd(0, TAU), far = B.R * rnd(1.05, 1.5);
       const delay = reduceMotion ? 0 : r.j * 120 + p * 45 + rnd(0, 160), dur = reduceMotion ? 10 : rnd(900, 1400);
       longest = Math.max(longest, delay + dur);
-      fly(r.j, p, e, from[perm[p]], { delay, dur, s0: .62, rot: rnd(-1.2, 1.2), cx: ccx + Math.cos(a) * far, cy: ccy + Math.sin(a) * far });
+      fly(r.j, p, e, from[perm[p]], { delay, dur, s0: .62, rot: rnd(-1.2, 1.2), flip: reduceMotion ? 0 : pick([1, 1, 2]), cx: ccx + Math.cos(a) * far, cy: ccy + Math.sin(a) * far });
     });
   }
   g.par = parOf();
@@ -973,8 +987,7 @@ function finish() {
 
 // ================================================================ BOARD INPUT: pick up, drag, drop, tap
 function hitBoard(clientX, clientY) {
-  const rect = cv.getBoundingClientRect();
-  const x = clientX - rect.left - B.cx, y = clientY - rect.top - B.cy;
+  const [x, y] = toBoard(clientX, clientY);                     // finger → point on the tilted board
   const r = Math.hypot(x, y), ang = Math.atan2(y, x), g = G();
   const wedge = mod(Math.round((ang + Math.PI / 2) / g.step), g.N);
   let j = Math.floor((r - B.hub) / B.t);
@@ -1101,6 +1114,125 @@ function tapSlot(j, p) {
   caption.textContent = t("tapPlace");
 }
 
+// ================================================================ 3D MOTION INPUT
+// One smoothed "look" value from -1..1 on each axis, used to tilt the board and move the 3D background.
+// Mouse: where the pointer is on screen. Phone: how the phone is tilted (gyro), re-centred slowly so
+// whatever way a child holds it counts as flat. With neither, the scene sways gently on its own.
+const motion = { x: 0, y: 0, tx: 0, ty: 0, gyro: false, g0: null, asked: false, lastInput: -1e9 };
+addEventListener("pointermove", (e) => {
+  if (motion.gyro && e.pointerType !== "mouse") return;
+  motion.tx = clamp(e.clientX / innerWidth * 2 - 1, -1, 1);
+  motion.ty = clamp(e.clientY / innerHeight * 2 - 1, -1, 1);
+  motion.lastInput = performance.now();
+}, { passive: true });
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const ang = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0;
+  let gx = e.gamma, gy = e.beta;                         // portrait: gamma = left/right, beta = forward/back
+  if (ang === 90) { gx = e.beta; gy = -e.gamma; }
+  else if (ang === -90 || ang === 270) { gx = -e.beta; gy = e.gamma; }
+  else if (ang === 180) { gx = -e.gamma; gy = -e.beta; }
+  if (!motion.g0) motion.g0 = [gx, gy];
+  motion.g0[0] += (gx - motion.g0[0]) * .006; motion.g0[1] += (gy - motion.g0[1]) * .006;
+  motion.gyro = true;
+  motion.tx = clamp((gx - motion.g0[0]) / 18, -1, 1);
+  motion.ty = clamp((gy - motion.g0[1]) / 18, -1, 1);
+  motion.lastInput = performance.now();
+}
+// iPhone asks for permission, and only after a tap
+function askMotion() {
+  if (motion.asked) return;
+  motion.asked = true;
+  const D = window.DeviceOrientationEvent;
+  if (!D || !matchMedia("(pointer: coarse)").matches) return;
+  if (typeof D.requestPermission === "function") D.requestPermission().then((s) => { if (s === "granted") addEventListener("deviceorientation", onOrient); }).catch(() => {});
+  else addEventListener("deviceorientation", onOrient);
+}
+addEventListener("touchend", askMotion, { passive: true });
+addEventListener("click", askMotion);
+function stepMotion(now, dt) {
+  let tx = motion.tx, ty = motion.ty;
+  if (now - motion.lastInput > 3500) {                   // nobody moving: a slow, gentle sway
+    tx = Math.sin(now / 2900) * .45; ty = Math.cos(now / 3700) * .3;
+  }
+  const k = 1 - Math.exp(-dt / 170);
+  motion.x += (tx - motion.x) * k; motion.y += (ty - motion.y) * k;
+}
+
+// ================================================================ 3D BOARD
+// The board is a thick disc that leans in 3D. Because it leans, a finger on the screen has to be mapped
+// back onto the tilted board (toBoard), and board points onto the screen (toScreen), so dragging stays exact.
+const b3d = $("#b3d");
+const BOARD3D = { ax: 0, ay: 0, spin: 0, P: 1000, built: false, MAX: 13 };
+function build3D() {
+  if (BOARD3D.built || !b3d) return;
+  BOARD3D.built = true;
+  const frag = [];
+  for (let i = 1; i <= 3; i++) frag.push(`<i class="b3d-edge" data-i="${i * 4}" style="--k:${i / 3}"></i>`);
+  frag.push('<i class="b3d-back" data-i="12.5"></i>');
+  b3d.insertAdjacentHTML("afterbegin", frag.join(""));
+  b3d.insertAdjacentHTML("beforeend", '<i class="b3d-gloss"></i>');
+  shape3D();
+}
+// place the layers that make the board's thickness. Deeper layers are scaled up a touch so perspective
+// doesn't shrink them out of sight: the side of the disc then shows as the board leans, like a real coin.
+function shape3D() {
+  if (!BOARD3D.built || !B.size) return;
+  const dz = Math.max(1.5, B.size * .0065), P = BOARD3D.P;
+  for (const el of b3d.querySelectorAll("[data-i]")) {
+    const i = +el.dataset.i, z = i * dz, k = (P + z) / P;
+    el.style.transform = `translateZ(${-z}px) scale(${k.toFixed(4)})${el.classList.contains("b3d-back") ? " rotateY(180deg)" : ""}`;
+  }
+}
+function boardCenter() { const r = stage.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+// columns of the board's rotation (rotateX(ax) then rotateY(ay) as CSS applies them)
+function boardAxes() {
+  const a = BOARD3D.ax * Math.PI / 180, b = (BOARD3D.ay + BOARD3D.spin) * Math.PI / 180;
+  const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b);
+  // R = Rx(a)·Ry(b); e1 → (cb, sa·sb, -ca·sb), e2 → (0, ca, sa)
+  return [[cb, sa * sb, -ca * sb], [0, ca, sa]];
+}
+function toScreen(lx, ly) {
+  const [c1, c2] = boardAxes(), P = BOARD3D.P, [cx, cy] = boardCenter();
+  const X = lx * c1[0] + ly * c2[0], Y = lx * c1[1] + ly * c2[1], Z = lx * c1[2] + ly * c2[2];
+  const k = P / (P - Z);
+  return [cx + X * k, cy + Y * k];
+}
+function toBoard(clientX, clientY) {
+  const [c1, c2] = boardAxes(), P = BOARD3D.P, [cx, cy] = boardCenter();
+  const sx = clientX - cx, sy = clientY - cy;
+  // P·X + sx·Z = sx·P and P·Y + sy·Z = sy·P, with X, Y, Z linear in the board point (x, y)
+  const a11 = P * c1[0] + sx * c1[2], a12 = P * c2[0] + sx * c2[2];
+  const a21 = P * c1[1] + sy * c1[2], a22 = P * c2[1] + sy * c2[2];
+  const det = a11 * a22 - a12 * a21 || 1e-6;
+  return [(sx * P * a22 - a12 * sy * P) / det, (a11 * sy * P - a21 * sx * P) / det];
+}
+function stepBoard3D(now, dt) {
+  const g = G();
+  if (!g || !b3d || !B.size) return;
+  build3D();
+  const max = reduceMotion ? 0 : BOARD3D.MAX;
+  let tx = motion.x, ty = motion.y;
+  if (g.drag && g.drag.on) {                       // the card you hold has weight: its side of the board dips
+    const [cx, cy] = boardCenter();
+    tx = clamp((g.drag.cx - cx) / (B.size * .5), -1.2, 1.2);
+    ty = clamp((g.drag.cy - cy) / (B.size * .5), -1.2, 1.2);
+  }
+  const k = 1 - Math.exp(-dt / (g.drag && g.drag.on ? 220 : 260));
+  BOARD3D.ay += (tx * max - BOARD3D.ay) * k;
+  BOARD3D.ax += (-ty * max - BOARD3D.ax) * k;
+  BOARD3D.spin = 0;
+  if (g.phase === "won" && !reduceMotion) {        // a full 3D flip when the puzzle is solved
+    const p = clamp((now - g.winT0 - 250) / 1500, 0, 1);
+    BOARD3D.spin = ease.inOut(p) * 360;
+  }
+  b3d.style.transform = `rotateX(${BOARD3D.ax.toFixed(2)}deg) rotateY(${(BOARD3D.ay + BOARD3D.spin).toFixed(2)}deg)`;
+  // the shine slides across as the board leans, and the shadow on the ground moves the other way
+  b3d.style.setProperty("--gx", (50 - BOARD3D.ay * 3.2).toFixed(1) + "%");
+  b3d.style.setProperty("--gy", (35 + BOARD3D.ax * 3.2).toFixed(1) + "%");
+  stage.style.setProperty("--sx", (-BOARD3D.ay * 1.6).toFixed(1) + "px");
+  stage.style.setProperty("--sy", (14 + BOARD3D.ax * 1.2).toFixed(1) + "px");
+}
 // ================================================================ BACKGROUND: floating pieces you can grab and throw
 // Every piece drifts on its own path (own speed, direction, wobble and spin), bounces off the edges
 // and off other pieces, moves aside when the pointer comes close, and can be dragged, thrown,
@@ -1143,7 +1275,7 @@ function makeToy(d, fromEdge) {
     x: rnd(w / 2, innerWidth - w / 2), y: rnd(h / 2, innerHeight - h / 2),
     vx: Math.cos(dir) * speed, vy: Math.sin(dir) * speed,
     dir, speed, turn: rnd(-.25, .25), seed: rnd(0, 100),
-    rot: rnd(-12, 12), spin: 0, wob: rnd(4, 11), scale: 1, grab: null, alpha: fromEdge ? 0 : 1, bornT: performance.now(),
+    rot: rnd(-12, 12), spin: 0, depth: rnd(.35, 1), ox: 0, oy: 0, tilt: rnd(0, TAU), wob: rnd(4, 11), scale: 1, grab: null, alpha: fromEdge ? 0 : 1, bornT: performance.now(),
   };
   if (fromEdge) {                                   // new pieces float in from a screen edge
     const side = Math.floor(rnd(0, 4));
@@ -1217,7 +1349,11 @@ function stepToys(now, dtMs) {
   for (const t of toys) {
     const wob = reduceMotion ? 0 : Math.sin(tsec * .8 + t.seed) * t.wob * .35;
     const bob = reduceMotion ? 0 : Math.sin(tsec * 1.1 + t.seed * 2) * 3;
-    t.el.style.transform = `translate3d(${(t.x - t.w / 2).toFixed(1)}px, ${(t.y - t.h / 2 + bob).toFixed(1)}px, 0) rotate(${(t.rot + wob).toFixed(1)}deg) scale(${t.scale.toFixed(3)})`;
+    // 3D: pieces at different depths slide by different amounts as you look around, and each one turns in 3D
+    t.ox = t.grab ? 0 : -motion.x * t.depth * 26; t.oy = t.grab ? 0 : -motion.y * t.depth * 18;
+    const ry = reduceMotion || t.grab ? 0 : Math.sin(tsec * .5 + t.tilt) * 28 + motion.x * 14;
+    const rx = reduceMotion || t.grab ? 0 : Math.cos(tsec * .37 + t.tilt) * 18 - motion.y * 10;
+    t.el.style.transform = `translate3d(${(t.x + t.ox - t.w / 2).toFixed(1)}px, ${(t.y + t.oy - t.h / 2 + bob).toFixed(1)}px, 0) perspective(500px) rotateX(${rx.toFixed(1)}deg) rotateY(${ry.toFixed(1)}deg) rotate(${(t.rot + wob).toFixed(1)}deg) scale(${(t.scale * (.82 + t.depth * .22)).toFixed(3)})`;
     t.el.style.opacity = t.grab ? "1" : (t.alpha * (document.body.classList.contains("playing") ? .4 : .78)).toFixed(3);
   }
   if (toyDrag.t) updateDropTarget();
@@ -1230,7 +1366,7 @@ function toyAt(x, y) {
   let best = null, bd = Infinity;
   for (const t of toys) {
     if (t.alpha < .5) continue;
-    const d = Math.hypot(t.x - x, t.y - y);
+    const d = Math.hypot(t.x + t.ox - x, t.y + t.oy - y);
     if (d < Math.max(t.w, t.h) * .55 && d < bd) { best = t; bd = d; }
   }
   return best;
@@ -1248,6 +1384,7 @@ document.addEventListener("pointerdown", (e) => {
   audio.ensure();
   e.preventDefault();
   toyDrag.t = t;
+  t.x += t.ox; t.y += t.oy; t.ox = t.oy = 0;
   t.grab = { id: e.pointerId, ox: e.clientX - t.x, oy: e.clientY - t.y, samples: [[performance.now(), e.clientX, e.clientY]] };
   t.vx = t.vy = 0; t.scale = 1.25; t.spin = 0;
   toyLift.appendChild(t.el);
@@ -1320,6 +1457,229 @@ addEventListener("pointermove", (e) => {
   document.body.classList.toggle("over-toy", canGrab(e) && !!toyAt(e.clientX, e.clientY));
 }, { passive: true });
 
+// ================================================================ 3D BACKGROUND
+// A tiny 3D engine on a canvas: low-poly shapes (mini magic boards, gems, planets, stars, rings)
+// float slowly towards you in an endless fly-through. Each one turns on its own. Near shapes shift
+// more than far ones when you move the mouse or tilt the phone (parallax), and far ones fade into
+// the haze. Tap empty background and the shapes nearby get bumped away with a spin.
+const bg3 = $("#bg3d");
+const b3c = bg3 ? bg3.getContext("2d") : null;
+const W3 = { W: 0, H: 0, d: 1, f: 600, near: 7, far: 36, objs: [], camX: 0, camY: 0 };
+const PAPER = [240, 245, 230];
+const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const PAL = [...ENTITY_COLOURS, ...RING_SHADES].map(hexRgb);
+const INK = hexRgb(BOARD_INK), SUN = hexRgb("#FFC23A"), BROWN = hexRgb("#8A5631");
+const small3 = () => innerWidth * innerHeight < 500000;
+
+// ---- meshes: { v: [[x,y,z]], f: [{ i: [vertex indices], c: [r,g,b] }] }, all about 1 unit across
+function meshBoard() {                         // a little magic-rings board: coloured slices on top, dark rim
+  const v = [], f = [], seg = 16, radii = [.28, .55, .8, 1], h = .12, slices = 8;
+  const cols = shuffle([...PAL]);
+  const ring = (r, y) => { const s = v.length; for (let u = 0; u < seg; u++) { const a = u / seg * TAU; v.push([Math.cos(a) * r, y, Math.sin(a) * r]); } return s; };
+  const tops = radii.map((r) => ring(r, -h));
+  const bot = ring(1, h);
+  const cTop = v.length; v.push([0, -h, 0]);
+  for (let u = 0; u < seg; u++) {
+    const u2 = (u + 1) % seg, sl = Math.floor(u / (seg / slices));
+    f.push({ i: [cTop, tops[0] + u, tops[0] + u2], c: SUN });
+    for (let k = 0; k < radii.length - 1; k++) f.push({ i: [tops[k] + u, tops[k + 1] + u, tops[k + 1] + u2, tops[k] + u2], c: cols[(sl + k * 3) % cols.length] });
+    f.push({ i: [tops[3] + u, bot + u, bot + u2, tops[3] + u2], c: INK });
+  }
+  f.push({ i: Array.from({ length: seg }, (_, u) => bot + u), c: INK });
+  return { v, f };
+}
+function meshGem() {                            // icosahedron
+  const t = (1 + Math.sqrt(5)) / 2, n = Math.hypot(1, t);
+  const v = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map((p) => p.map((q) => q / n));
+  const F = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  const c = pick(PAL);
+  return { v, f: F.map((i) => ({ i, c })) };
+}
+function meshSphere(r, c, lat, lon) {
+  const v = [], f = [];
+  for (let a = 0; a <= lat; a++) for (let b = 0; b < lon; b++) {
+    const th = a / lat * Math.PI, ph = b / lon * TAU;
+    v.push([Math.sin(th) * Math.cos(ph) * r, Math.cos(th) * r, Math.sin(th) * Math.sin(ph) * r]);
+  }
+  for (let a = 0; a < lat; a++) for (let b = 0; b < lon; b++) {
+    const b2 = (b + 1) % lon;
+    f.push({ i: [a * lon + b, a * lon + b2, (a + 1) * lon + b2, (a + 1) * lon + b], c: a % 3 === 1 ? c.map((q) => q * .88) : c });
+  }
+  return { v, f };
+}
+function meshTorus(R, r, nu, nv, colourOf) {
+  const v = [], f = [];
+  for (let u = 0; u < nu; u++) for (let w = 0; w < nv; w++) {
+    const a = u / nu * TAU, b = w / nv * TAU;
+    v.push([(R + r * Math.cos(b)) * Math.cos(a), r * Math.sin(b), (R + r * Math.cos(b)) * Math.sin(a)]);
+  }
+  const base = v.length;
+  for (let u = 0; u < nu; u++) { const a = (u + .5) / nu * TAU; v.push([R * Math.cos(a), 0, R * Math.sin(a)]); }
+  for (let u = 0; u < nu; u++) for (let w = 0; w < nv; w++) {
+    const u2 = (u + 1) % nu, w2 = (w + 1) % nv;
+    f.push({ i: [u * nv + w, u2 * nv + w, u2 * nv + w2, u * nv + w2], c: colourOf(u), o: base + u });
+  }
+  return { v, f };
+}
+function meshPlanet() {                          // a planet with a flat ring round it
+  const lo = small3();
+  const s = meshSphere(.62, pick(PAL), lo ? 5 : 7, lo ? 9 : 12);
+  const ringC = pick(PAL);
+  const t = meshTorus(1, .06, lo ? 14 : 20, 3, () => ringC);
+  t.v.forEach((p) => { p[1] *= .35; });
+  const off = s.v.length;
+  return { v: [...s.v, ...t.v], f: [...s.f, ...t.f.map((x) => ({ i: x.i.map((k) => k + off), c: x.c, o: x.o + off }))] };
+}
+function meshRing() {                            // a fat ring cut into coloured slices, like the game board
+  const cols = shuffle([...PAL]).slice(0, 4), lo = small3();
+  return meshTorus(.72, .26, 16, lo ? 5 : 7, (u) => cols[Math.floor(u / 2) % cols.length]);
+}
+function meshStar() {                            // a puffy five-point star
+  const v = [], f = [], n = 10, d = .22;
+  v.push([0, 0, -d * 1.6], [0, 0, d * 1.6]);
+  for (let k = 0; k < n; k++) { const a = -Math.PI / 2 + k * TAU / n, r = k % 2 ? .42 : 1; v.push([Math.cos(a) * r, Math.sin(a) * r, 0]); }
+  const c = SUN, c2 = hexRgb("#FFB020");
+  for (let k = 0; k < n; k++) { const a = 2 + k, b = 2 + (k + 1) % n; f.push({ i: [0, a, b], c: k % 2 ? c : c2 }); f.push({ i: [1, b, a], c: k % 2 ? c2 : c }); }
+  return { v, f };
+}
+function meshFlower() {                          // Tolo's sunflower head: a brown middle and petals
+  const v = [], f = [], n = 12;
+  v.push([0, 0, -.12], [0, 0, .12]);
+  const mid = [];
+  for (let k = 0; k < n; k++) { const a = k / n * TAU; mid.push(v.length); v.push([Math.cos(a) * .42, Math.sin(a) * .42, 0]); }
+  for (let k = 0; k < n; k++) { const k2 = (k + 1) % n; f.push({ i: [0, mid[k], mid[k2]], c: BROWN }); f.push({ i: [1, mid[k2], mid[k]], c: BROWN }); }
+  for (let k = 0; k < n; k++) {
+    const a = (k + .5) / n * TAU, s = v.length;
+    v.push([Math.cos(a) * 1, Math.sin(a) * 1, 0], [Math.cos(a - .2) * .5, Math.sin(a - .2) * .5, .05], [Math.cos(a + .2) * .5, Math.sin(a + .2) * .5, -.05]);
+    f.push({ i: [s, s + 1, s + 2], c: k % 2 ? SUN : hexRgb("#FFD45C"), o: -1 });
+  }
+  return { v, f };
+}
+// every mesh gets an "inside" point per face (fc.o), so we know which way is out and can skip faces turned away
+function finish(m) {
+  const o = m.v.length; m.v.push([0, 0, 0]);
+  for (const fc of m.f) if (fc.o === undefined) fc.o = o;
+  return m;
+}
+const MAKERS = [[meshBoard, 3], [meshRing, 3], [meshGem, 3], [meshPlanet, 2], [meshStar, 3], [meshFlower, 2]];
+function pickMaker() { const tot = MAKERS.reduce((a, m) => a + m[1], 0); let r = Math.random() * tot; for (const [m, w] of MAKERS) { r -= w; if (r <= 0) return () => finish(m()); } return () => finish(meshGem()); }
+
+function spawn3(o, anywhere) {
+  o.mesh = pickMaker()();
+  o.z = anywhere ? rnd(W3.near + 5, W3.far) : W3.far + rnd(0, 4);
+  const spanX = W3.W / 2 / W3.f, spanY = W3.H / 2 / W3.f;
+  o.x = rnd(-1.15, 1.15) * spanX * o.z; o.y = rnd(-1.1, 1.1) * spanY * o.z;
+  o.s = rnd(.7, 1.15);
+  o.rx = rnd(0, TAU); o.ry = rnd(0, TAU); o.rz = rnd(0, TAU);
+  o.wx = rnd(-.5, .5); o.wy = rnd(-.6, .6); o.wz = rnd(-.3, .3);
+  o.spd = rnd(.8, 1.6); o.vx = 0; o.vy = 0; o.vz = 0; o.kick = 0;
+  o.bob = rnd(0, TAU);
+  return o;
+}
+function size3() {
+  if (!bg3) return;
+  const d = Math.min(innerWidth < 700 ? 1 : 1.25, devicePixelRatio || 1);      // soft, hazy layer: no need for full sharpness
+  W3.W = innerWidth; W3.H = innerHeight; W3.d = d;
+  bg3.width = Math.round(innerWidth * d); bg3.height = Math.round(innerHeight * d);
+  W3.f = Math.max(innerWidth, innerHeight) * .62;
+  const want = Math.round(clamp(innerWidth * innerHeight / 70000, 8, 18));
+  while (W3.objs.length < want) W3.objs.push(spawn3({}, true));
+  W3.objs.length = want;
+}
+// poke: shapes near the tap are pushed away and spin
+function poke3(x, y) {
+  let hit = 0;
+  for (const o of W3.objs) {
+    if (o.sx === undefined) continue;
+    const d = Math.hypot(o.sx - x, o.sy - y), R = 150 + o.sr;
+    if (d > R) continue;
+    const k = 1 - d / R, dx = (o.sx - x) / (d || 1), dy = (o.sy - y) / (d || 1);
+    o.vx += dx * k * 3.2; o.vy += dy * k * 3.2; o.vz += k * 4; o.kick += k * 9;
+    hit++;
+  }
+  if (hit) { audio.play("swap"); buzz(6); }
+  burst(x, y, 10, 4);
+}
+document.addEventListener("pointerdown", (e) => {
+  if (toyDrag.t || e.button > 0 || !canGrab(e) || toyAt(e.clientX, e.clientY)) return;
+  poke3(e.clientX, e.clientY);
+});
+
+const L3 = (() => { const v = [-.45, -.8, -.5], n = Math.hypot(...v); return v.map((q) => q / n); })();
+const faces3 = [];
+function step3D(now, dtMs) {
+  if (!b3c || !W3.W) return;
+  const dt = Math.min(.05, dtMs / 1000);
+  // slow phone? frames taking long for a few seconds: thin out the background so the game stays smooth
+  W3.slow = (W3.slow || 0) * .98 + (dtMs > 30 ? 1 : 0) * .02;
+  if (W3.slow > .6 && W3.objs.length > 5 && now - (W3.cut || 0) > 2500) { W3.objs.length -= 2; W3.cut = now; }
+  // camera follows the look direction a little: near shapes slide more than far ones
+  W3.camX += (motion.x * 2.6 - W3.camX) * .08;
+  W3.camY += (motion.y * 1.8 - W3.camY) * .08;
+  const playing = document.body.classList.contains("playing");
+  const speed = reduceMotion ? 0 : (playing ? .55 : 1);
+  faces3.length = 0;
+  for (const o of W3.objs) {
+    // fly towards you, turn, bob; kicks from a tap fade out
+    o.z -= (o.spd * speed - o.vz) * dt;
+    o.x += o.vx * dt; o.y += o.vy * dt;
+    const damp = Math.pow(.25, dt); o.vx *= damp; o.vy *= damp; o.vz *= damp; o.kick *= damp;
+    const sp = speed + o.kick;
+    o.rx += o.wx * sp * dt; o.ry += o.wy * sp * dt; o.rz += o.wz * sp * dt;
+    if (o.z < W3.near || o.z > W3.far + 8) { spawn3(o, false); continue; }
+    const bob = Math.sin(now / 1600 + o.bob) * .12;
+    const fade = clamp((W3.far + 4 - o.z) / 6, 0, 1) * clamp((o.z - W3.near) / 4, 0, 1);
+    const fog = Math.pow(clamp((o.z - 9) / (W3.far - 9), 0, 1), 1.3) * .62;
+    if (fade <= .01) continue;
+    const cx = Math.cos(o.rx), sx = Math.sin(o.rx), cy = Math.cos(o.ry), sy = Math.sin(o.ry), cz = Math.cos(o.rz), sz = Math.sin(o.rz);
+    const px = o.x - W3.camX, py = o.y + bob - W3.camY, pz = o.z;
+    // transform vertices into the camera's view, then onto the screen
+    const tv = o.mesh.v.map(([x, y, z]) => {
+      x *= o.s; y *= o.s; z *= o.s;
+      let y1 = y * cx - z * sx, z1 = y * sx + z * cx;
+      let x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy;
+      let x3 = x2 * cz - y1 * sz, y3 = x2 * sz + y1 * cz;
+      const X = x3 + px, Y = y3 + py, Z = z2 + pz;
+      const k = W3.f / Math.max(.1, Z);
+      return [X, Y, Z, W3.W / 2 + X * k, W3.H / 2 + Y * k];
+    });
+    o.sx = W3.W / 2 + px * W3.f / pz; o.sy = W3.H / 2 + py * W3.f / pz; o.sr = o.s * W3.f / pz;
+    for (const fc of o.mesh.f) {
+      const a = tv[fc.i[0]], b = tv[fc.i[1]], c = tv[fc.i[2]];
+      let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+      let ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+      let nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      let fx = 0, fy = 0, fz = 0; for (const k of fc.i) { fx += tv[k][0]; fy += tv[k][1]; fz += tv[k][2]; }
+      const nI = fc.i.length; fx /= nI; fy /= nI; fz /= nI;
+      if (fc.o >= 0) {
+        const r = tv[fc.o];                                         // point the normal outwards…
+        if (nx * (fx - r[0]) + ny * (fy - r[1]) + nz * (fz - r[2]) < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        if (nx * fx + ny * fy + nz * fz >= 0) continue;             // …and skip faces turned away from us
+      } else if (nx * fx + ny * fy + nz * fz > 0) { nx = -nx; ny = -ny; nz = -nz; }   // flat petals: both sides
+      const dif = Math.max(0, nx * L3[0] + ny * L3[1] + nz * L3[2]);
+      const spec = Math.pow(Math.max(0, -nz * .7 + dif * .5), 14) * 70;
+      const lit = .6 + .48 * dif;
+      const col = fc.c.map((q, i) => Math.round(clamp(q * lit + spec, 0, 255) * (1 - fog) + PAPER[i] * fog));
+      faces3.push({ z: fz, pts: fc.i.map((k) => tv[k]), col: `rgb(${col[0]},${col[1]},${col[2]})`, a: fade });
+    }
+  }
+  faces3.sort((p, q) => q.z - p.z);                // far faces first
+  b3c.setTransform(W3.d, 0, 0, W3.d, 0, 0);
+  b3c.clearRect(0, 0, W3.W, W3.H);
+  b3c.lineJoin = "round"; b3c.lineWidth = .9;
+  for (const fc of faces3) {
+    b3c.globalAlpha = fc.a;
+    b3c.beginPath();
+    b3c.moveTo(fc.pts[0][3], fc.pts[0][4]);
+    for (let i = 1; i < fc.pts.length; i++) b3c.lineTo(fc.pts[i][3], fc.pts[i][4]);
+    b3c.closePath();
+    b3c.fillStyle = fc.col; b3c.fill();
+    b3c.strokeStyle = fc.col; b3c.stroke();       // hides hairline gaps between faces
+  }
+  b3c.globalAlpha = 1;
+}
+addEventListener("resize", size3);
 // ================================================================ FLOW
 function say(s) { (S.mode === "home" ? homeSpeech : playSpeech).say(s); }
 
@@ -1744,6 +2104,8 @@ function frame(now) {
   const dt = Math.min(64, now - lastFrame); lastFrame = now;
   for (const s of [homeSpeech, playSpeech, introSpeech]) s.tick(dt);
   const look = pointer;
+  stepMotion(now, dt);
+  step3D(now, dt);
   stepToys(now, dt);
   if (S.mode === "home") {
     toloHome.update(now, toyDrag.t ? [toyDrag.t.x, toyDrag.t.y] : look, homeSpeech.talking);
@@ -1754,6 +2116,7 @@ function frame(now) {
     if (S.mode === "done") toloDone.update(now, null, false);
     if (!B.size) layoutBoard();
     updateRings(now, dt);
+    stepBoard3D(now, dt);
     drawBoard(now);
     drawFloat(now);
     const g = G();
@@ -1773,6 +2136,7 @@ addEventListener("pointermove", (e) => { pointer = [e.clientX, e.clientY]; }, { 
 buildRays();
 FX.resize();
 sizeFloat();
+size3();
 document.documentElement.lang = S.lang;
 applyTexts();
 setScreen("home");
@@ -1782,5 +2146,5 @@ if (document.fonts) {
   Promise.all(['800 20px "Baloo 2"', '800 20px "Baloo Bhaina 2"'].map((f) => document.fonts.load(f, "Aaअଅ").catch(() => null)))
     .then(() => { textCache.clear(); renderCarousel(); });
 }
-if (/[?&]debug\b/.test(location.search)) window.__rings = { S, G, startGame, startMix, swapCards, isRight, placed, parOf, useHint, slotScreen, car, carGo, B, hitBoard, LEVELS };
+if (/[?&]debug\b/.test(location.search)) window.__rings = { S, G, BOARD3D, toScreen, toBoard, motion, W3, poke3, startGame, startMix, swapCards, isRight, placed, parOf, useHint, slotScreen, car, carGo, B, hitBoard, LEVELS };
 })();

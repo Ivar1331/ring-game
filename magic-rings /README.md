@@ -1,6 +1,6 @@
 # Tolo's Magic Rings 🌻
 
-A drag-and-drop ring puzzle for kids, in **English, हिन्दी and ଓଡ଼ିଆ**, made for **KiddyMaitri**.
+A 3D drag-and-drop ring puzzle for kids, in **English, हिन्दी and ଓଡ଼ିଆ**, made for **KiddyMaitri**.
 It's the second game after *Discover India* and uses the same look, Tolo the Sunflower, sounds and celebrations.
 
 ## How it plays
@@ -14,6 +14,8 @@ It's the second game after *Discover India* and uses the same look, Tolo the Sun
 - **Hint** (bulb button or `H`) puts one card in the right place for you. It costs 2 moves.
 - Card words pick their **best fit** on their own: upright, along the ring, or along the slice, whichever lets them be biggest.
 - Touch any slice and the bar under the board shows its full names, which helps on small phones.
+- **3D board:** the board is a thick disc that leans towards the mouse, or with the phone's tilt sensor (iPhone asks for permission after the first tap). While a card is held, its side of the board dips as if the card had weight. Cards flip over in 3D while the puzzle mixes, and the whole board flips round when you win.
+- **3D background:** low-poly shapes (mini magic boards, gems, planets, stars and sunflowers) float towards you in an endless fly-through. Near shapes slide more than far ones as you look around, and tapping empty background bumps the nearby shapes away. On slow phones the background thins itself out so the game stays smooth. Everything holds still for players who turn on "reduce motion".
 - **Playful background:** words, animal pictures and flags float around, each on its own path. Grab one and throw it so it bounces off the others, or drop it on Tolo and she reads it out loud. The pieces fade back while a puzzle is being played.
 
 ### Difficulty

@@ -283,3 +283,24 @@ html[lang="hi"] .hero-title .b, html[lang="or"] .hero-title .b { letter-spacing:
 /* cards that are picked up or flying across the screen */
 #float { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 45; }
 #rings.dragging { cursor: grabbing; }
+
+/* ------------------------------------------------------------ 3D */
+/* background fly-through (drawn by js), behind the floating pieces */
+#bg3d { position: absolute; inset: 0; width: 100%; height: 100%; transition: opacity .6s; }
+body.playing #bg3d { opacity: .5; }
+.toy { backface-visibility: hidden; }
+
+/* the board is a thick disc that leans in 3D (perspective is set from js to suit its size) */
+.board { perspective-origin: 50% 50%; }
+.b3d { position: relative; transform-style: preserve-3d; will-change: transform; border-radius: 50%; }
+.b3d > * { position: absolute; inset: 0; border-radius: 50%; }
+.b3d #rings { position: relative; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.b3d-edge { margin: 3px; background: #A9B8A6; background: color-mix(in srgb, #8FB39A calc((1 - var(--k)) * 100%), #1F4A35); }
+.b3d-back { margin: 3px; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: radial-gradient(circle, #8A5631 0 17%, #FFC23A 18% 34%, var(--leaf) 35% 100%); }
+.b3d-gloss { pointer-events: none; transform: translateZ(1px);
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 35%), rgba(255,255,255,.34), rgba(255,255,255,0) 46%); mix-blend-mode: soft-light; }
+.board-shadow { position: absolute; left: 50%; top: 50%; width: var(--bs, 70%); aspect-ratio: 1; border-radius: 50%; pointer-events: none;
+  transform: translate(calc(-50% + var(--sx, 0px)), calc(-50% + var(--sy, 14px))) scaleY(.96);
+  background: radial-gradient(closest-side, rgba(28,51,38,.28), rgba(28,51,38,0)); filter: blur(10px); }
+@media (prefers-reduced-motion: reduce) { .b3d { transform: none !important; } }
