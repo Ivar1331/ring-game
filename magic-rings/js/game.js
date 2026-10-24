@@ -42,7 +42,7 @@ const graphemes = (s) => (segmenter ? [...segmenter.segment(s)].map((x) => x.seg
 const store = {
   load() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } },
   save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ best: S.best, lang: S.lang, sound: audio.on, diff: S.diff })); } catch { /* private mode */ }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ best: S.best, scores: S.scores, lang: S.lang, sound: audio.on, diff: S.diff })); } catch { /* private mode */ }
   },
 };
 
@@ -52,6 +52,7 @@ const browserLang = (navigator.language || "en").slice(0, 2);
 const S = {
   lang: LANGS.includes(saved.lang) ? saved.lang : (browserLang === "hi" || browserLang === "or" ? browserLang : "en"),
   best: saved.best && typeof saved.best === "object" ? saved.best : {},
+  scores: saved.scores && typeof saved.scores === "object" ? saved.scores : {},   // best score per puzzle and difficulty
   diff: DIFFICULTIES.some((d) => d.key === saved.diff) ? saved.diff : "easy",
   // Teacher mode: press U on the home screen, or open the page with ?unlock at the end of the address
   unlockAll: /[?&]unlock\b/.test(location.search),
@@ -67,7 +68,7 @@ const tl = (o) => (o && typeof o === "object" ? (o[S.lang] ?? o.en) : o);
 const DIFF = (k = S.diff) => DIFFICULTIES.find((d) => d.key === k);
 const bestOf = (lv) => S.best[lv.key] || {};
 const anyStars = (lv) => Object.values(bestOf(lv)).some((n) => n > 0);
-const unlocked = (i) => S.unlockAll || i === 0 || anyStars(LEVELS[i - 1]);
+const unlocked = () => true;                     // every puzzle is open from the start
 const totalStars = () => LEVELS.reduce((s, lv) => s + Object.values(bestOf(lv)).reduce((a, b) => a + b, 0), 0);
 const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p); } catch { /* not supported */ } };
 const mod = (a, n) => ((a % n) + n) % n;
@@ -166,6 +167,11 @@ const audio = {
         break;
       case "whirr": this.noise(now, 1.7, { f: 260, to: 3200, vol: .08, q: 2.2, atk: .2 }); this.tone(170, now, 1.6, { to: 760, vol: .045, type: "sawtooth", atk: .25 }); break;
       case "swap": this.noise(now, .26, { f: 700, to: 3400, vol: .1, q: .9 }); this.tone(520, now, .18, { to: 880, vol: .07 }); break;
+      case "alarm": // alarm-clock bell, then a sad little "wah wah"
+        for (let i = 0; i < 12; i++) this.tone(i % 2 ? 1320 : 1580, now + i * .065, .055, { type: "square", vol: .045 });
+        this.tone(392, now + .9, .32, { to: 349, type: "triangle", vol: .15 });
+        this.tone(330, now + 1.25, .55, { to: 247, type: "triangle", vol: .15, vib: 10 });
+        break;
       case "spin": this.seq([523, 659, 784, 1047, 1319, 1568, 2093], .06, { type: "triangle", vol: .12 }); this.noise(now, 1.2, { f: 400, to: 6000, vol: .06, q: .7 }); break;
       case "ready": this.seq([784, 0, 784, 0, 1175], .09, { type: "triangle", vol: .14 }); break;
       case "slide": this.tone(380 + arg * 60, now, .06, { type: "triangle", vol: .05 }); break;
@@ -479,6 +485,7 @@ function newGame(levelIdx, diffKey) {
     levelIdx, lv, D, K, N, step: TAU / N, ents, rings,
     phase: "preview", previewT0: performance.now(), previewDur: Math.min(8000, Math.max(4200, N * 1000)),
     moves: 0, hintsLeft: D.hints, hintsUsed: 0, par: 0, streak: 0,
+    limit: limitFor(lv, D), target: 0, lastSec: undefined, timeUpT0: 0, result: null,
     start: 0, pausedAt: null, end: null,
     flights: [], picked: null, drag: null, cursor: { j: 1, p: 0 }, showCursor: false,
     hoverWedge: -1, readWedge: 0, winT0: 0,
@@ -534,8 +541,9 @@ function slotScreen(j, p) {
 }
 
 // ================================================================ TEXT: best fit
-// A card can show its words upright, along the ring, or along the slice. We try all three
-// and use whichever lets the words be biggest (upright wins a tie because it is easiest to read).
+// A card's words are bent along the curve of their ring (the top half reads clockwise, the bottom half
+// is turned so it still reads left to right). If the words would be much bigger upright or along the
+// slice, that is used instead.
 const textCache = new Map();
 function wrapLines(c2, words, maxW) {
   const lines = []; let line = "";
@@ -572,10 +580,10 @@ function fitCard(text, ac, rIn, rOut, half) {
   // 1. upright: a level box inside the turned card
   const Bt = chord(rIn + (rOut - rIn) * .25);
   const up = fitBlock(text, (bw, bh) => bw * c + bh * sn <= T && bw * sn + bh * c <= Bt, maxS);
-  if (up) options.push({ ...up, rot: 0, score: up.size + 1.5 });
-  // 2. along the ring: lines follow the curve, the block's height goes across the ring
-  const al = fitBlock(text, (bw, bh) => bh <= T && bw <= chord(rMid - bh / 2), maxS);
-  if (al) options.push({ ...al, rot: readable(ac + Math.PI / 2), score: al.size + .5 });
+  if (up) options.push({ ...up, rot: 0, score: up.size + 1 });
+  // 2. curved: every line bends along the ring (preferred, so it gets a head start)
+  const cu = fitCurve(text, ac, rIn, rOut, half, maxS);
+  if (cu) options.push({ ...cu, score: cu.size + 3 });
   // 3. along the slice: lines point out from the middle
   const ra = fitBlock(text, (bw, bh) => bw <= T && bh <= chord(rMid - bw / 2), maxS);
   if (ra) options.push({ ...ra, rot: readable(ac), score: ra.size });
@@ -583,6 +591,63 @@ function fitCard(text, ac, rIn, rOut, half) {
   if (!r) { ctx.font = `800 7px ${textFont()}`; r = { size: 6.5, lines: wrapLines(ctx, String(text).split(/\s+/), 1), lh: 7, rot: readable(ac + Math.PI / 2) }; }
   textCache.set(key, r);
   return r;
+}
+
+// ---- curved text
+// Letters are placed one cluster at a time along an arc. Hindi and Odia letters that join together
+// (a consonant with its vowel sign, or two consonants joined by a halant) stay together as one piece.
+const segm = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+function clusters(str) {
+  const parts = segm ? Array.from(segm.segment(str), (x) => x.segment) : Array.from(str);
+  const out = [];
+  for (const c of parts) {
+    const prev = out[out.length - 1];
+    if (prev && (/[\u094D\u0B4D\u200D]$/.test(prev) || /^[\u0900-\u0903\u093A-\u094F\u0951-\u0957\u0962\u0963\u0B01-\u0B03\u0B3C-\u0B57\u0B62\u0B63\u200C\u200D]/.test(c))) out[out.length - 1] = prev + c;
+    else out.push(c);
+  }
+  return out;
+}
+// radius of line i of n: the first line is always the "top" one as you read it
+const lineRad = (i, n, lh, rMid, flip) => rMid + (flip ? -1 : 1) * ((n - 1) / 2 - i) * lh;
+function fitCurve(text, ac, rIn, rOut, half, maxS) {
+  const T = (rOut - rIn) * .84, rMid = (rIn + rOut) / 2;
+  const flip = Math.sin(ac) > 1e-3;              // bottom half: turn the letters so they are not upside down
+  const words = String(text).split(/\s+/);
+  for (let size = maxS; size >= 7; size -= .5) {
+    ctx.font = `800 ${size}px ${textFont()}`;
+    const lh = size * 1.02;
+    const full = ctx.measureText(words.join(" ")).width;
+    for (const f of [1, .72, .55, .4, 0]) {
+      const lines = wrapLines(ctx, words, Math.max(1, full * f));
+      const n = lines.length;
+      if (n * lh > T) continue;
+      const meas = lines.map((l) => { const cl = clusters(l), ws = cl.map((c) => ctx.measureText(c).width); return { cl, ws, tot: ws.reduce((a, b) => a + b, 0) }; });
+      const ok = meas.every((m, i) => {
+        const rad = lineRad(i, n, lh, rMid, flip) - size * .5;
+        return m.tot <= 2 * (half * rad - B.gap) * .86;
+      });
+      if (ok) return { size, lines, lh, curve: true, flip, rMid, meas };
+    }
+  }
+  return null;
+}
+function drawCurved(f, ac) {
+  ctx.font = `800 ${f.size}px ${textFont()}`;
+  ctx.fillStyle = "#1C3326"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const n = f.lines.length;
+  f.meas.forEach((m, i) => {
+    const rad = lineRad(i, n, f.lh, f.rMid, f.flip);
+    let a = f.flip ? ac + m.tot / rad / 2 : ac - m.tot / rad / 2;
+    m.cl.forEach((c, k) => {
+      const da = m.ws[k] / rad, am = f.flip ? a - da / 2 : a + da / 2;
+      ctx.save();
+      ctx.translate(B.cx + Math.cos(am) * rad, B.cy + Math.sin(am) * rad);
+      ctx.rotate(f.flip ? am - Math.PI / 2 : am + Math.PI / 2);
+      ctx.fillText(c, 0, 0);
+      ctx.restore();
+      a += f.flip ? -da : da;
+    });
+  });
 }
 
 // ================================================================ DRAWING
@@ -629,6 +694,7 @@ function drawCardContent(r, e, ac, rIn, rOut, half) {
     return;
   }
   const f = fitCard(tl(v), ac, rIn, rOut, half);
+  if (f.curve) { drawCurved(f, ac); return; }
   ctx.save();
   ctx.translate(x, y); ctx.rotate(f.rot);
   ctx.font = `800 ${f.size}px ${textFont()}`;
@@ -648,6 +714,7 @@ function drawBoard(now) {
   ctx.shadowColor = "rgba(28,51,38,.35)"; ctx.shadowBlur = B.size * .04; ctx.shadowOffsetY = B.size * .015;
   ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
   ctx.restore();
+  drawTimerRing(now);
   ctx.fillStyle = BOARD_INK; ctx.beginPath(); ctx.arc(cx, cy, outer + B.gap * .6, 0, TAU); ctx.fill();
   for (let s = 0; s < g.N; s++) {
     const a = -Math.PI / 2 + (s + .5) * g.step + guide().angle;
@@ -742,7 +809,7 @@ function drawHub(now) {
     const left = Math.max(0, Math.ceil((g.previewDur - (now - g.previewT0)) / 1000));
     ctx.font = `800 ${hub * .62}px ${textFont()}`; ctx.fillText(String(left), cx, cy + hub * .04);
   } else {
-    const label = g.phase === "won" ? "★" : `${placed()}/${movable()}`;
+    const label = g.phase === "won" ? "★" : g.phase === "timeup" ? "⏰" : `${placed()}/${movable()}`;
     ctx.font = `800 ${hub * (label.length > 4 ? .3 : .38)}px ${textFont()}`; ctx.fillText(label, cx, cy + hub * .04);
   }
 }
@@ -956,33 +1023,130 @@ function win() {
   renderPlayChrome();
   setTimeout(finish, 2300);
 }
-function stars() {
-  const g = G();
-  const extra = g.moves - g.par;
-  return extra <= Math.max(1, Math.round(g.par * .2)) ? 3 : extra <= Math.max(4, Math.round(g.par * .7)) ? 2 : 1;
+// ================================================================ TIME LIMIT AND SCORE
+// Every puzzle has a time limit that grows with the number of cards to place.
+// Score: 100 for every card in the right place, 10 for every second left (only when solved), minus 50 per hint.
+function limitFor(lv, D) {
+  const K = Math.min(D.rings, lv.rings.length), N = Math.min(D.slices, lv.items.length);
+  return Math.max(30, Math.round((K - 1) * N * D.secsPerCard / 5) * 5);
 }
-function finish() {
+const fmtTime = (sec) => { sec = Math.max(0, Math.ceil(sec - 1e-6)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; };
+function timeLeft() { const g = G(); if (!g) return 0; return g.start ? Math.max(0, g.limit - elapsedMs() / 1000) : g.limit; }
+function drawTimerRing(now) {
+  const g = G(), { cx, cy, outer, R } = B;
+  const left = timeLeft(), frac = g.limit ? left / g.limit : 1;
+  const rr = (outer + R) / 2 + .5;
+  let w = (R - outer) * .58;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#E7ECE1"; ctx.lineWidth = w;
+  ctx.beginPath(); ctx.arc(cx, cy, rr, 0, TAU); ctx.stroke();
+  if (g.phase === "timeup") {                    // empty ring blinks red
+    const k = (now - g.timeUpT0) / 160;
+    if (Math.floor(k) % 2 === 0 && k < 12) { ctx.strokeStyle = "#E2574A"; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, TAU); ctx.stroke(); }
+    return;
+  }
+  if (frac <= 0) return;
+  const low = g.phase === "play" && left <= 10;
+  if (low) w *= 1 + .22 * Math.abs(Math.sin(now / 160));
+  ctx.lineWidth = w;
+  ctx.strokeStyle = frac > .5 ? "#3BB273" : frac > .2 ? "#F2B134" : "#E2574A";
+  ctx.beginPath(); ctx.arc(cx, cy, rr, -Math.PI / 2, -Math.PI / 2 + TAU * frac); ctx.stroke();
+  // a little sun rides on the end of the ring
+  const a = -Math.PI / 2 + TAU * frac, sx = cx + Math.cos(a) * rr, sy = cy + Math.sin(a) * rr;
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(sx, sy, w * .62, 0, TAU); ctx.fill();
+  ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.arc(sx, sy, w * .36, 0, TAU); ctx.fill();
+}
+function stepTimer() {
   const g = G();
-  if (!g || S.g !== g) return;
+  if (!g || g.phase !== "play" || S.mode !== "play" || g.pausedAt !== null) return;
+  const left = timeLeft(), sec = Math.ceil(left);
+  if (sec !== g.lastSec) {
+    if (g.lastSec !== undefined && sec <= 10 && sec > 0) {
+      audio.play("tick", sec <= 5 ? 1500 : 1050); buzz(sec <= 5 ? 14 : 6);
+      $("#st-time").classList.remove("bump"); void $("#st-time").offsetWidth; $("#st-time").classList.add("bump");
+      if (sec === 10) { playSpeech.say(t("hurry")); toloPlay.react("oops", 1200); }
+    }
+    g.lastSec = sec;
+  }
+  if (left <= 0) timeUp();
+}
+function timeUp() {
+  const g = G();
+  g.phase = "timeup";
+  g.end = g.start + g.limit * 1000;            // pauses already pushed g.start forward
+  g.timeUpT0 = performance.now();
+  g.picked = null; g.hoverWedge = -1;
+  if (g.drag) {                                  // a card still in the hand goes back to its place
+    const dr = g.drag; g.drag = null; cv.classList.remove("dragging");
+    if (dr.on) fly(dr.j, dr.p, dr.e, [dr.cx, dr.cy], { dur: 300, s0: 1.05 });
+  }
+  stage.classList.add("timeup");
+  audio.play("alarm"); buzz([90, 60, 90, 60, 240]);
+  toloPlay.react("oops", 2600);
+  playSpeech.say(t("timeUpSay", { n: placed(), m: movable() }));
+  const el = document.createElement("div");
+  el.className = "timeup-banner";
+  el.innerHTML = `<span class="clock">⏰</span><b>${esc(t("timeUp"))}</b>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2700);
+  renderPlayChrome();
+  setTimeout(() => finish(false), 2500);
+}
+function scoreOf(won) {
+  const g = G(), n = placed(), left = won ? Math.floor(timeLeft()) : 0;
+  const cards = n * 100, bonus = left * 10, pen = g.hintsUsed * 50;
+  return { n, left, cards, bonus, pen, total: Math.max(0, cards + bonus - pen) };
+}
+// stars come from how much time is left
+function stars() {
+  const f = timeLeft() / G().limit;
+  return f >= .5 ? 3 : f >= .2 ? 2 : 1;
+}
+const scoresOf = (lv) => S.scores[lv.key] || {};
+function finish(won = true) {
+  const g = G();
+  if (!g || S.g !== g || S.mode === "done") return;
   S.mode = "done";
-  const n = stars();
-  const rec = S.best[g.lv.key] || (S.best[g.lv.key] = {});
-  rec[g.D.key] = Math.max(rec[g.D.key] || 0, n);
+  const n = won ? stars() : 0, sc = scoreOf(won);
+  if (n) { const rec = S.best[g.lv.key] || (S.best[g.lv.key] = {}); rec[g.D.key] = Math.max(rec[g.D.key] || 0, n); }
+  const sr = S.scores[g.lv.key] || (S.scores[g.lv.key] = {});
+  const prev = sr[g.D.key] || 0, isBest = sc.total > prev && sc.total > 0;
+  if (isBest) sr[g.D.key] = sc.total;
   store.save();
-  audio.play("win");
-  buzz([60, 60, 60, 60, 200]);
-  toloDone.react("cheer", Infinity);
-  rain(160); petalShower(60);
-  renderDone(n);
+  g.result = { won, n, sc, prev, isBest, beat: g.target ? sc.total > g.target : null };
+  if (won) { audio.play("win"); buzz([60, 60, 60, 60, 200]); toloDone.react("cheer", Infinity); rain(160); petalShower(60); }
+  else { audio.play("soft"); toloDone.react("happy", Infinity); }
+  renderDone(g.result);
   $("#done-ov").classList.add("show");
   for (let i = 0; i < 3; i++) {
     setTimeout(() => {
-      const s = $$("#done-stars svg")[i];
-      if (!s || S.mode !== "done") return;
-      s.classList.add("in");
-      if (i < n) { audio.play("star", i); const b = s.getBoundingClientRect(); burst(b.left + b.width / 2, b.top + b.height / 2, 26, 7); }
+      const st = $$("#done-stars svg")[i];
+      if (!st || S.mode !== "done") return;
+      st.classList.add("in");
+      if (i < n) { audio.play("star", i); const b = st.getBoundingClientRect(); burst(b.left + b.width / 2, b.top + b.height / 2, 26, 7); }
     }, 700 + i * 380);
   }
+  countUp(sc.total, 900 + 3 * 380, g.result);
+}
+// the score counts up, then a "new best" badge pops in
+function countUp(total, delay, res) {
+  const el = $("#score-num");
+  if (!el) return;
+  const t0 = performance.now() + delay, dur = Math.min(1600, 500 + total / 3);
+  let lastTick = 0;
+  const step = (now) => {
+    if (S.mode !== "done" || !el.isConnected) return;
+    const k = Math.max(0, Math.min(1, (now - t0) / dur));
+    el.textContent = Math.round(ease.out(k) * total).toLocaleString("en-IN");
+    if (k > 0 && k < 1 && now - lastTick > 70) { lastTick = now; audio.play("tick", 900 + k * 900); }
+    if (k < 1) { requestAnimationFrame(step); return; }
+    const box = $("#done-score");
+    box.classList.add("landed");
+    const b = el.getBoundingClientRect();
+    if (res.isBest || res.beat) { burst(b.left + b.width / 2, b.top + b.height / 2, 46, 9); audio.play("streak", 4); petalShower(30); }
+    else audio.play("select");
+  };
+  requestAnimationFrame(step);
 }
 
 // ================================================================ BOARD INPUT: pick up, drag, drop, tap
@@ -1226,7 +1390,12 @@ function stepBoard3D(now, dt) {
     const p = clamp((now - g.winT0 - 250) / 1500, 0, 1);
     BOARD3D.spin = ease.inOut(p) * 360;
   }
-  b3d.style.transform = `rotateX(${BOARD3D.ax.toFixed(2)}deg) rotateY(${(BOARD3D.ay + BOARD3D.spin).toFixed(2)}deg)`;
+  let shake = 0;
+  if (g.phase === "timeup" && !reduceMotion) {   // time's up: the board rattles like an alarm clock
+    const k = Math.max(0, 1 - (now - g.timeUpT0) / 1100);
+    shake = Math.sin(now / 26) * 7 * k;
+  }
+  b3d.style.transform = `rotateX(${BOARD3D.ax.toFixed(2)}deg) rotateY(${(BOARD3D.ay + BOARD3D.spin).toFixed(2)}deg) rotateZ(${shake.toFixed(2)}deg)`;
   // the shine slides across as the board leans, and the shadow on the ground moves the other way
   b3d.style.setProperty("--gx", (50 - BOARD3D.ay * 3.2).toFixed(1) + "%");
   b3d.style.setProperty("--gy", (35 + BOARD3D.ax * 3.2).toFixed(1) + "%");
@@ -1556,13 +1725,13 @@ function meshFlower() {                          // Tolo's sunflower head: a bro
   return { v, f };
 }
 // every mesh gets an "inside" point per face (fc.o), so we know which way is out and can skip faces turned away
-function finish(m) {
+function meshDone(m) {
   const o = m.v.length; m.v.push([0, 0, 0]);
   for (const fc of m.f) if (fc.o === undefined) fc.o = o;
   return m;
 }
 const MAKERS = [[meshBoard, 3], [meshRing, 3], [meshGem, 3], [meshPlanet, 2], [meshStar, 3], [meshFlower, 2]];
-function pickMaker() { const tot = MAKERS.reduce((a, m) => a + m[1], 0); let r = Math.random() * tot; for (const [m, w] of MAKERS) { r -= w; if (r <= 0) return () => finish(m()); } return () => finish(meshGem()); }
+function pickMaker() { const tot = MAKERS.reduce((a, m) => a + m[1], 0); let r = Math.random() * tot; for (const [m, w] of MAKERS) { r -= w; if (r <= 0) return () => meshDone(m()); } return () => meshDone(meshGem()); }
 
 function spawn3(o, anywhere) {
   o.mesh = pickMaker()();
@@ -1683,27 +1852,27 @@ addEventListener("resize", size3);
 // ================================================================ FLOW
 function say(s) { (S.mode === "home" ? homeSpeech : playSpeech).say(s); }
 
-function startGame(levelIdx, diffKey = S.diff) {
-  if (!unlocked(levelIdx)) {
-    homeSpeech.say(t("unlockFirst", { name: tl(LEVELS[levelIdx - 1].name) }));
-    toloHome.react("oops", 1500); audio.play("wrong");
-    return;
-  }
+function startGame(levelIdx, diffKey = S.diff, opts = {}) {
   audio.play("click");
   closeDone();
+  stage.classList.remove("timeup");
   S.level = levelIdx; S.diff = diffKey; store.save();
   S.g = newGame(levelIdx, diffKey);
+  S.g.target = opts.target || 0;
   setScreen("play");
   geometry(); B.size = 0; requestAnimationFrame(() => { layoutBoard(); });
   renderPlayChrome(); renderLegend();
   caption.textContent = "";
   openRules();
 }
-function newMix() {
+function newMix(target) {
   if (!S.g) return;
   audio.play("click");
   closeDone();
+  stage.classList.remove("timeup");
+  const keep = typeof target === "number" ? target : S.g.target;
   S.g = newGame(S.g.levelIdx, S.g.D.key);
+  S.g.target = keep || 0;
   geometry();
   S.mode = "play";
   renderPlayChrome(); renderLegend();
@@ -1724,6 +1893,7 @@ function rulePages() {
   const list = g.rings.map((r) => tl(r.def.name)).join(" · ");
   const pages = S.seenRules ? [] : [...t("rules")];
   pages.push(t("ringsAre", { list }));
+  pages.push(t("rulesTime", { t: fmtTime(g.limit) }));
   if (g.D.ringOnly) pages.push(t("rulesHard"));
   return pages;
 }
@@ -1783,6 +1953,11 @@ function setLang(l, announce = true) {
 }
 const cycleLang = () => setLang(LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]);
 
+function elapsedMs() {
+  const g = G();
+  if (!g || !g.start) return 0;
+  return Math.max(0, (g.end ?? g.pausedAt ?? performance.now()) - g.start);
+}
 function elapsed() {
   const g = G();
   if (!g || !g.start) return 0;
@@ -1825,7 +2000,8 @@ function renderDiff() {
   const i = carIndex(), lv = LEVELS[i];
   $("#diff").innerHTML = DIFFICULTIES.map((d) => {
     const got = bestOf(lv)[d.key] || 0;
-    const info = t("diffInfo", { r: Math.min(d.rings, lv.rings.length), s: Math.min(d.slices, lv.items.length) });
+    const best = scoresOf(lv)[d.key];
+    const info = `${t("diffInfo", { r: Math.min(d.rings, lv.rings.length), s: Math.min(d.slices, lv.items.length) })} · ⏱ ${fmtTime(limitFor(lv, d))}${best ? ` · 🏆 ${best.toLocaleString("en-IN")}` : ""}`;
     return `<button role="radio" aria-checked="${d.key === S.diff}" data-diff="${d.key}" style="--c:${d.color}">
       <b>${d.emoji} ${esc(t(d.key))}${got ? ` <span aria-label="${got}">${"★".repeat(got)}</span>` : ""}</b><small>${esc(info)}</small></button>`;
   }).join("");
@@ -1844,7 +2020,8 @@ function renderPlayChrome() {
   const g = G();
   if (!g) return;
   $("#play-title").textContent = `${g.lv.emoji} ${tl(g.lv.name)}`;
-  $("#play-sub").innerHTML = `<b>${esc(t(g.D.key))}</b>&nbsp;&nbsp;${esc(t("diffInfo", { r: g.K, s: g.N }))}`;
+  $("#play-sub").innerHTML = `<b>${esc(t(g.D.key))}</b>&nbsp;&nbsp;${esc(t("diffInfo", { r: g.K, s: g.N }))} · ⏱ ${fmtTime(g.limit)}` +
+    (g.target ? ` <span class="target-chip">🎯 ${esc(t("beatTarget", { n: g.target.toLocaleString("en-IN") }))}</span>` : "");
   $("#st-moves b").textContent = g.moves;
   $("#st-locks b").textContent = `${placed()}/${movable()}`;
   $("#ready-btn").innerHTML = `<i></i>${esc(t("ready"))}`;
@@ -1877,14 +2054,30 @@ function renderDock() {
     btn("help", icon("i-help"), t("tipHelp")) +
     btn("lang", LANG_GLYPH[S.lang], t("tipLang"), false, " lang");
 }
-function renderDone(n) {
-  const g = G();
-  $("#done-band").style.setProperty("--c", g.lv.color);
-  $("#done-msg").textContent = t("doneMsg")[n];
+function renderDone(res) {
+  const g = G(), { won, n, sc } = res;
+  $("#done").classList.toggle("lost", !won);
+  $("#done-band").style.setProperty("--c", won ? g.lv.color : "#FFD9C7");
+  $("#done-title").textContent = won ? t("complete") : t("timeUp");
+  $("#done-msg").textContent = won ? t("doneMsg")[n] : t("timeUpMsg", { n: sc.n, m: movable() });
   $("#done-stars").innerHTML = [0, 1, 2].map((i) => icon("i-star", i < n ? "#FFC23A" : "#E6EADF")).join("");
-  $$("#done-stars svg").forEach((s, i) => { if (i < n) s.style.filter = "drop-shadow(0 4px 0 #E69A0E)"; });
-  const statsList = [["moves", g.moves, "#FFE08A"], ["time", timeText(), "#D4CEFA"], ["hints", g.hintsUsed, "#C2EBDD"]];
+  $$("#done-stars svg").forEach((st, i) => { if (i < n) st.style.filter = "drop-shadow(0 4px 0 #E69A0E)"; });
+  // the score, how it was made, and the best so far
+  const rows = [[`✅ ${t("cardsPts")}`, `${sc.n} × 100`, sc.cards]];
+  if (won) rows.push([`⏱ ${t("timeBonus")}`, `${sc.left}s × 10`, sc.bonus]);
+  if (sc.pen) rows.push([`💡 ${t("hints")}`, `${g.hintsUsed} × 50`, -sc.pen]);
+  const best = Math.max(res.prev, sc.total);
+  let badge = "";
+  if (res.beat) badge = `<span class="badge-best">🎯 ${esc(t("beatIt"))}</span>`;
+  else if (res.isBest) badge = `<span class="badge-best">🏆 ${esc(t("newBest"))}</span>`;
+  else if (g.target) badge = `<span class="badge-miss">${esc(t("missTarget", { n: g.target.toLocaleString("en-IN") }))}</span>`;
+  $("#done-score").innerHTML = `<div class="score-top"><span>${esc(t("score"))}</span><b id="score-num">0</b>${badge}</div>
+    <div class="score-rows">${rows.map(([a, b, v]) => `<div><span>${esc(a)}</span><em>${esc(b)}</em><b>${v < 0 ? "−" : "+"}${Math.abs(v).toLocaleString("en-IN")}</b></div>`).join("")}</div>
+    <div class="score-best">${esc(t("best"))}: <b>${best.toLocaleString("en-IN")}</b></div>`;
+  $("#done-score").classList.remove("landed");
+  const statsList = [["moves", g.moves, "#FFE08A"], ["timeUsed", timeText(), "#D4CEFA"], ["hints", g.hintsUsed, "#C2EBDD"]];
   $("#done-grid").innerHTML = statsList.map(([k, v, c]) => `<div class="stat" style="--c:${c}"><span>${esc(t(k))}</span><b>${esc(v)}</b></div>`).join("");
+  $("#matched-title").textContent = won ? t("matched") : t("answers");
   $("#match-list").innerHTML = Array.from({ length: g.N }, (_, s) => {
     const e = guide().order[s];
     const vals = g.rings.map((r) => {
@@ -1893,14 +2086,19 @@ function renderDone(n) {
     }).join("");
     return `<div class="match-row" style="--i:${s}">${vals}</div>`;
   }).join("");
+  // what next
   const di = DIFFICULTIES.findIndex((d) => d.key === g.D.key);
   const harder = DIFFICULTIES[di + 1];
-  const nextOk = g.levelIdx + 1 < LEVELS.length;
+  const next = LEVELS[(g.levelIdx + 1) % LEVELS.length];
   $("#done-btns").innerHTML =
-    `<button class="btn btn-ghost" data-act="restart">${esc(t("replay"))}</button>` +
-    `<button class="btn btn-ghost" data-act="home">${esc(t("home"))}</button>` +
-    (harder ? `<button class="btn btn-ghost" data-act="harder">${esc(t("tryHarder", { d: t(harder.key) }))}</button>` : "") +
-    `<button class="btn btn-dark" data-act="${nextOk ? "nextlevel" : "home"}">${esc(nextOk ? t("nextLevel") : t("allDone"))} ${icon("i-arrow")}</button>`;
+    `<button class="btn ${won ? "btn-ghost" : "btn-dark"}" data-act="restart">${icon("i-restart")} ${esc(won ? t("replay") : t("tryAgain"))}</button>` +
+    (best ? `<button class="btn btn-sun" data-act="beat">🎯 ${esc(t("beatScore"))} <small>${best.toLocaleString("en-IN")}</small></button>` : "") +
+    (won && harder ? `<button class="btn btn-ghost" data-act="harder">${harder.emoji} ${esc(t("tryHarder", { d: t(harder.key) }))}</button>` : "") +
+    `<button class="btn ${won ? "btn-dark" : "btn-ghost"}" data-act="nextlevel">${next.emoji} ${esc(t("nextLevel"))} ${icon("i-arrow")}</button>`;
+  $("#done-cats").innerHTML = `<h3>${esc(t("pickCategory"))}</h3><div class="cat-row">` +
+    LEVELS.map((lv, i) => `<button class="cat${i === g.levelIdx ? " on" : ""}" data-act="pickcat" data-i="${i}" style="--c:${lv.color}"><em>${lv.emoji}</em><span>${esc(tl(lv.name))}</span>${scoresOf(lv)[g.D.key] ? `<small>🏆 ${scoresOf(lv)[g.D.key].toLocaleString("en-IN")}</small>` : ""}</button>`).join("") +
+    `<button class="cat home" data-act="home"><em>🏠</em><span>${esc(t("home"))}</span></button></div>`;
+  $("#done").scrollTop = 0;
 }
 function buildRays() {
   $("#rays").innerHTML = Array.from({ length: 18 }, (_, i) => {
@@ -2027,10 +2225,12 @@ document.addEventListener("click", (e) => {
     play: () => startGame(carIndex(), S.diff),
     prev: () => carGo(-1), nextcard: () => carGo(1),
     home: goHome, sound: toggleSound, lang: cycleLang, help: () => { audio.play("click"); openRules(); },
-    restart: newMix, hint: useHint,
+    restart: () => newMix(0), hint: useHint,
+    beat: () => { if (!g) return; const best = scoresOf(g.lv)[g.D.key] || 0; newMix(best); playSpeech.say(t("beatTarget", { n: best.toLocaleString("en-IN") })); },
+    pickcat: () => { if (g) startGame(+b.dataset.i, g.D.key); },
     ready: () => { if (g && g.phase === "preview") startMix(); },
     next: nextPage, skip: () => { audio.play("page"); closeRules(); },
-    nextlevel: () => { if (g) startGame(Math.min(g.levelIdx + 1, LEVELS.length - 1), g.D.key); },
+    nextlevel: () => { if (g) startGame((g.levelIdx + 1) % LEVELS.length, g.D.key); },
     harder: () => { if (!g) return; const di = DIFFICULTIES.findIndex((d) => d.key === g.D.key); startGame(g.levelIdx, DIFFICULTIES[Math.min(di + 1, 2)].key); },
   })[b.dataset.act]?.();
 });
@@ -2053,10 +2253,10 @@ document.addEventListener("keydown", (e) => {
     if (k === "arrowleft") carGo(-1);
     else if (k === "arrowright") carGo(1);
     else if (k === "enter" && !e.target.closest("button")) startGame(carIndex(), S.diff);
-    else if (k === "u") { S.unlockAll = true; homeSpeech.say(t("teacher")); toloHome.react("cheer", 1800); renderHome(); petalShower(60); audio.play("lang"); }
     else if (/^[1-9]$/.test(k) && +k <= LEVELS.length) { car.target = +k - 1; onCarChange(); }
     return;
   }
+  if (S.mode === "done") { if (k === "enter") { e.preventDefault(); newMix(0); } return; }
   if (S.mode === "intro") { if (["enter", " ", "arrowright"].includes(k)) { e.preventDefault(); nextPage(); } return; }
   if (S.mode !== "play" || !g) return;
   if (g.phase === "preview" && (k === "enter" || k === " ")) { e.preventDefault(); startMix(); return; }
@@ -2125,7 +2325,9 @@ function frame(now) {
       const ri = $("#ready-btn i"); if (ri) ri.style.setProperty("--p", (p * 100).toFixed(1) + "%");
       if (p >= 1) startMix();
     }
-    const tt = timeText(); const tb = $("#st-time b"); if (tb.textContent !== tt) tb.textContent = tt;
+    stepTimer();
+    const tt = fmtTime(timeLeft()), tb = $("#st-time b"); if (tb.textContent !== tt) tb.textContent = tt;
+    $("#st-time").classList.toggle("warn", (g.phase === "play" && timeLeft() <= 10) || g.phase === "timeup");
   }
   else drawFloat(now);
   requestAnimationFrame(frame);
@@ -2140,11 +2342,11 @@ size3();
 document.documentElement.lang = S.lang;
 applyTexts();
 setScreen("home");
-homeSpeech.say(S.unlockAll ? t("teacher") : t("homeHello"));
+homeSpeech.say(t("homeHello"));
 requestAnimationFrame(frame);
 if (document.fonts) {
   Promise.all(['800 20px "Baloo 2"', '800 20px "Baloo Bhaina 2"'].map((f) => document.fonts.load(f, "Aaअଅ").catch(() => null)))
     .then(() => { textCache.clear(); renderCarousel(); });
 }
-if (/[?&]debug\b/.test(location.search)) window.__rings = { S, G, BOARD3D, toScreen, toBoard, motion, W3, poke3, startGame, startMix, swapCards, isRight, placed, parOf, useHint, slotScreen, car, carGo, B, hitBoard, LEVELS };
+if (/[?&]debug\b/.test(location.search)) window.__rings = { timeLeft, finish, scoreOf, fitCard, S, G, BOARD3D, toScreen, toBoard, motion, W3, poke3, startGame, startMix, swapCards, isRight, placed, parOf, useHint, slotScreen, car, carGo, B, hitBoard, LEVELS };
 })();

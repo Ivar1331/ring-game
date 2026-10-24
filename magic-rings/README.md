@@ -10,9 +10,12 @@ It's the second game after *Discover India* and uses the same look, Tolo the Sun
 - Then every card **flies off on its own** and lands in a new slice.
 - **Pick up any card and drag it** to the slice where it belongs (or tap the card, then tap the slice). The card already there swaps places with it. Cards stay in their own ring.
 - The **inside ring is the guide** and never moves. A card that is right **turns gold, gets a tick and stays put**. A full ring gets a big celebration.
-- Make every slice match to win. Fewer moves earn more stars ⭐⭐⭐.
+- **Beat the clock:** every puzzle has a time limit (more cards, more time). A countdown ring runs round the board and the last 10 seconds tick and flash red. When time runs out an alarm clock rings, the board rattles and the end menu shows the right answers.
+- **Score:** 100 points for every card in the right place, plus 10 points for every second left when you solve it, minus 50 for each hint. Stars come from how much time is left. Best scores are saved for every puzzle and difficulty.
+- **End menu:** Play again, Beat your score (play again with your best as the target), Next puzzle, Try a harder level, pick a different puzzle, or go Home.
+- All puzzles are open from the start.
 - **Hint** (bulb button or `H`) puts one card in the right place for you. It costs 2 moves.
-- Card words pick their **best fit** on their own: upright, along the ring, or along the slice, whichever lets them be biggest.
+- Card words **bend along the curve** of their ring (and turn round on the bottom half so they always read left to right). Hindi and Odia letters stay properly joined.
 - Touch any slice and the bar under the board shows its full names, which helps on small phones.
 - **3D board:** the board is a thick disc that leans towards the mouse, or with the phone's tilt sensor (iPhone asks for permission after the first tap). While a card is held, its side of the board dips as if the card had weight. Cards flip over in 3D while the puzzle mixes, and the whole board flips round when you win.
 - **3D background:** low-poly shapes (mini magic boards, gems, planets, stars and sunflowers) float towards you in an endless fly-through. Near shapes slide more than far ones as you look around, and tapping empty background bumps the nearby shapes away. On slow phones the background thins itself out so the game stays smooth. Everything holds still for players who turn on "reduce motion".
@@ -34,10 +37,7 @@ It's the second game after *Discover India* and uses the same look, Tolo the Sun
 4. 🗺️ **Indian States**: state, dance, capital, handloom, temple (the same words as the map game)
 5. 🪐 **Planets**: place from the Sun, planet, colour, famous for, length of a year
 
-Each game picks a random set of items, so every play is different. Each puzzle unlocks the next once you earn at least one star on any difficulty.
-
-**Teacher mode:** press `U` on the home screen, or open the game with `?unlock` at the end of the address, e.g. `https://YOUR-SITE.netlify.app/?unlock`.
-
+Each game picks a random set of items, so every play is different. 
 **Keys:** `←` `→` pick a slice · `↑` `↓` pick a ring · `Enter` pick up / drop a card · `H` hint · `R` new mix · `M` sound · `L` language · `?` rules · `Esc` home. On the home screen: `←` `→` browse puzzles, `Enter` play, `1`–`5` jump to a puzzle.
 
 ---
